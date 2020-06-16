@@ -541,10 +541,12 @@ def detect_all(img,pt,cdict):
     df = pd.DataFrame(columns = ['image_name','part','part_number','area','col','sc_points'])
     h,w  = img.shape[:2]
     for part in ['T','B','M']:
+        img2 = img
         if 'T' not in part:
-            img = detect_color(img,cdict[part+'L'],cdict[part+'U'])
+            print(part)
+            img2 = detect_color(img,cdict[part+'L'],cdict[part+'U'])
 
-        img0 = grayscale(img)
+        img0 = grayscale(img2)
         imgplot(img0)
         img0[img0>60] = 200
         img0[img0<=60] = 0
@@ -584,12 +586,11 @@ def detect_all(img,pt,cdict):
 
 
 
-
 #アノテーション画像から甲状腺の中心、端を特定してプローブの位置を補正する
 
 #甲状腺全体における各列の幅を計算
 
-def calc_width(img,factor=0.3):
+def calc_width(img,factor=0.27):
     img = grayscale(img)
     img[img<60] = 0
     img[img!=0] = 240
@@ -609,7 +610,7 @@ def calc_width(img,factor=0.3):
             index += 1
     
     slist = np.array(slist)
-    n = int(slist.shape[0]*factor)
+    n = int(slist.shape[0]*factor + 0.25)
     
     t_dist = slist[np.argsort(slist[:,2])[n],2]
     t_width = slist[np.argsort(slist[:,3])[n],3]
@@ -644,7 +645,7 @@ def detect_center(img,scol,slist):
         #print(np.sort(slist[i[0]:,3])[int((slist.shape[0]-i[0])*0.2)])
         #print(np.min(slist[np.where(slist[:,2]<=d)[0],3]))
         
-        if (w < np.sort(slist[:i[0],3])[int(i[0]*0.2)] and w < np.sort(slist[i[0]:,3])[int((slist.shape[0]-i[0])*0.2)]) or w <= np.min(slist[np.where(slist[:,2]<=d)[0],3]):
+        if i[0]>=10 and ((w < np.sort(slist[:i[0],3])[int(i[0]*0.2)] and w < np.sort(slist[i[0]:,3])[int((slist.shape[0]-i[0])*0.2)]) or (w <= np.min(slist[np.where(slist[:,2]<d)[0],3]) and (w < np.sort(slist[:i[0],3])[int(i[0]*0.3)] and w < np.sort(slist[i[0]:,3])[int((slist.shape[0]-i[0])*0.3)]))):
             print(i,w,d,smin,2*w+d)
             if smin ==0:
                 smin = 2*w+d
@@ -741,7 +742,7 @@ def calc_schema_edge(sc2,I1):
         xl = int((xp+xp2)/2+0.5)
         print(yl,xl)
         for i in range(x2-x+1):
-            print(i,xl,yl,xl-i,sc2[yl,xl-i],'  ',xl+i,sc2[yl,xl+i])
+            #print(i,xl,yl,xl-i,sc2[yl,xl-i],'  ',xl+i,sc2[yl,xl+i])
             if edge[0]<0 and sc2[yl,xl-i] > 160:
                 edge[0] = xl-i
                 
@@ -752,6 +753,7 @@ def calc_schema_edge(sc2,I1):
                 break
     
     return edge
+
 
 
 def shift_probe(I1,sh,tste):
@@ -798,7 +800,7 @@ def shift_probe(I1,sh,tste):
         l = xp2 - xp
         s0,s1 = I1['s_edge']
         cmax = int((I1['sc2_dim'][0] + I1['sc2_dim'][1])/2 + 0.5)
-        
+        t_edge = I1['t_edge']
         print(t_center,t_edge,s0,s1,cmax)
         
         # shift
@@ -806,13 +808,13 @@ def shift_probe(I1,sh,tste):
             if side == 'left':
                 print(1,I1['direction'],side)
                 a,_ = tste
-                start = s0 - a*l/n 
+                start = int(s0 - a*l/n + 0.5)
                 end = start + l
                 
             else:
                 print(1,I1['direction'],side)
                 _,a = tste
-                end = s1 + a*l/n 
+                end = int(s1 + a*l/n  + 0.5)
                 start = end - l
         
         
@@ -869,10 +871,16 @@ def shift_probe(I1,sh,tste):
                 I1['side'] = 'middle'
                 
         
-        print(yp,yp2)
+        print(yp,yp2,xp,xp2)
         imgplot(sh)
         print(start,end)
-        sh = np.zeros(sh.shape)
+        if end > sh.shape[1]:
+             sh = np.zeros((sh.shape[0],end+1))
+        elif start < 0:
+            sh = np.zeros((sh.shape[0],sh.shape[1]-start+1))
+            start = 0
+        else:
+            sh = np.zeros(sh.shape)
         sh[yp:yp2,start:end] = 250
         I1['sh_dim'] = (start,end,yp,yp2)
         imgplot(sh)
