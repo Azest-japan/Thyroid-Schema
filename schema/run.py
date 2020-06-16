@@ -18,9 +18,8 @@ from m_sc import *
 pt = ['255','06']
 
 img = cv2.imread('/test/Ito/SelectedP/'+pt[0]+'_Image0'+pt[1]+'.jpg')
-img2 = cv2.imread('/test/Ito/test2/a_'+pt[0]+'_Image0'+pt[1]+'.jpg')
-
 t,b,l,r = cut(img)
+img2 = cv2.imread('/test/Ito/test2/a_'+pt[0]+'_Image0'+pt[1]+'.jpg')
 img2 = img2[t:b,l:r]
 
 cdict = {}
@@ -34,14 +33,14 @@ cdict['BL'] = np.array([0, 20, 100])
 cdict['BU'] = np.array([60, 100, 250])
 
 #Malignant
-cdict['ML'] =  np.array([0, 60, 0])
-cdict['MU'] = np.array([250, 200, 20])
+cdict['ML'] =  np.array([180, 80, 0])
+cdict['MU'] = np.array([250, 120, 20])
 
 
 #df_P = pd.DataFrame(columns = ['patient_name','type','no_of_images','df_I_list','schema'])
 
 df_I = pd.DataFrame(columns = ['image_name','dimensions','shape','direction','side','df_US','sc2_dim','sh_dim','t_center','t_edge','s_edge'])
-I1 = pd.Series([pt[0]+'_'+pt[1],(t,b,l,r),img2.shape[:2],None,None,None,None,None,None,None],index = df_I.columns)
+I1 = pd.Series([pt[0]+'_'+pt[1],(t,b,l,r),img2.shape[:2],None,None,None,None,None,None,None,None],index = df_I.columns)
 
 df_US = detect_all(img2,pt,cdict)
 
