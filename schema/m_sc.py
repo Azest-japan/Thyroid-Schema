@@ -12,12 +12,12 @@ from matplotlib.patches import Polygon
 from collections import Counter
 import statistics
 import pickle
-
+from scipy import stats
 from math import floor
 from decimal import Decimal, ROUND_HALF_UP
 import pprint
 
-from PatientClass import cut
+from dataprep import cut
 
 
 
@@ -380,120 +380,6 @@ elif direction == 'horizonal':
 
 
 
-#スキーマから不要な部分を削除
-def remove_neck(sc1,cmax,pl=True):
-    #上側の消去
-    '''
-    m_sc1,n_sc1 = sc1.shape
-    
-    n=0     #Horizontal
-    neck=0  #vertical
-    cen_row_max = 0
-    cen_row_min = 0
-
-    for (i, x) in enumerate(sc1[:,cmax]):
-
-        if x>=30 and n==0:
-            n+=1
-            neck = i
-        elif x>=30 and n==1:
-            neck = i
-        elif x<30 and n==1:
-            n+=1
-        elif x>=100 and n==2 and cen_row_min==0:
-            cen_row_min = i
-            n+=1
-        elif x<100 and n==3:
-            n+=1
-        elif x>=100 and n==4:
-            n+=1
-            cen_row_max = i
-        elif x>=100 and n==5:
-            cen_row_max = i
-
-    sc2 = sc1.copy()
-    #sc2[:neck+1,:]=0
-    
-    if pl==True:
-        print('head')
-        imgplot(sc2)
-        
-    
-    #左右の探索
-    left = 0
-    right = n_sc1
-
-    ur_copy = sc2.copy()
-    
-    ur_copy[cen_row_min:,] = 0
-    
-    ur_temp = np.count_nonzero(ur_copy > 20, axis = 0)
-    print(ur_temp)
-    n = 0
-    for (i, x) in enumerate(ur_temp):
-        if x > 0 and n == 0:
-            n = 1
-            left = i
-        elif x > 0 and n == 1:
-            left = i
-        elif x == 0 and n == 1:
-            n += 1
-            break
-
-
-    n = 0
-    for (i, x) in enumerate(reversed(ur_temp)):
-        if x > 0 and n == 0:
-            n = 1
-            right = n_sc1 - 1-i
-        elif x > 0 and n == 1:
-            right = n_sc1 - 1-i
-        elif x == 0 and n == 1:
-            n += 1
-            break
-
-    sc2[:,:left+1]=0
-    sc2[:,right:]=0
-    if pl==True:
-        imgplot(sc2)
-    '''
-    
-    #下の探索
-    
-    m_sc1,n_sc1 = sc1.shape
-    sc2 = sc1.copy()
-    ub_copy = sc1.copy()
-    ub_temp = np.count_nonzero(ub_copy > 20, axis = 1)
-    n = 0
-    for (i, x) in enumerate(reversed(ub_temp)):
-        if x > 0 and n == 0:
-            n = 1
-            bottom = m_sc1 - 1-i
-        elif x > 0 and n == 1:
-            bottom = m_sc1 - 1-i
-        elif x == 0 and n == 1:
-            n += 1
-            break
-    
-    #print('bottom:',bottom)
-    if cen_row_max < bottom or cen_row_min < bottom:
-        sc2[bottom:,:]=0
-    '''
-    #ノイズを除去
-    sc2 = np.where(sc2<10,0,sc2)
-    for i in range(1,m_sc1-1):
-            for j in range(1,n_sc1-1):
-                if (sc2[i,j] > 0 and sc2[i,j-1] == 0 and sc2[i,j+1] == 0 and sc2[i-1,j-1] == 0
-                and sc2[i-1,j+1] == 0 and sc2[i+1,j-1] == 0 and sc2[i+1,j+1] == 0):
-                    sc2[i,j] = 0
-    if pl == True:
-        print('sc2')
-        imgplot(sc2)
-    '''
-    return cen_row_min,cen_row_max,sc2
-
-
-
 def clean_probe(sh,direction='vertical'):
     contours, _ = cv2.findContours(sh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     print("{} contours.".format(len(contours)))
@@ -517,7 +403,7 @@ def clean_probe(sh,direction='vertical'):
     contours, _ = cv2.findContours(sh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     xp,yp,wp,hp = cv2.boundingRect(contours[0])
     sh[yp:yp+hp,xp:xp+wp] = 250
-    return xp,yp,wp,hp,sh
+    return xp,yp,wp-1,hp-1,sh
 
 
 #輪郭描写
@@ -535,6 +421,7 @@ def draw_contours(ax, img, contours):
         # 輪郭の番号を描画する。
         ax.text(cnt[0][0], cnt[0][1], i, color="orange", size="20")
 
+
         
 #外接矩形の座標計算
 def make_boundingRect(sc2):
@@ -551,7 +438,8 @@ def make_boundingRect(sc2):
     draw_contours(ax, sc2, contours)
     plt.show()
      
-    
+    x2 = x + w
+    y2 = y + h
     if len(contours) > 1:
         cnt_list = [cnt]
         x2 = x + w
@@ -577,72 +465,60 @@ def make_boundingRect(sc2):
                 print(cnt_i.shape,'remove')
                 sc2[yt:yt+ht,xt:xt+wt] = 0
             
-        w = x2 - x
-        h = y2 - y
-        cmax = x + int((w+0.5)/2)
-        print(y,y2,x,x2,w,h,cmax)
-        print('sc2 - 0')
-        imgplot(sc2[y:y2,x:x2])
-        
-        for i in range(y,y2):
-            if np.nonzero(sc2[i,x:cmax])[0].shape[0] !=0:
+    w = x2 - x
+    h = y2 - y
+    
+    cmax = x + int((w+0.5)/2)
+    print(y,y2,x,x2,w,h,cmax)
+    print('sc2 - 0')
+    imgplot(sc2[y:y2,x:x2])
+    ab = []
+    for i in range(y,y2):
+        if np.nonzero(sc2[i,x:cmax])[0].shape[0] !=0:
                 #print(i,sc2[i,x:cmax],np.nonzero(sc2[i,x:cmax]),np.min(np.nonzero(sc2[i,x:cmax])))
-                a = np.min(np.nonzero(sc2[i,x:cmax]))
+            a = np.min(np.nonzero(sc2[i,x:cmax]))
+        else:
+            a = 0
+        if np.nonzero(sc2[i,cmax:x2])[0].shape[0] !=0:
+            #print(i,sc2[i,cmax:x2],np.nonzero(sc2[i,cmax:x2]),np.max(np.nonzero(sc2[i,cmax:x2])))
+            b = np.max(np.nonzero(sc2[i,cmax:x2]))
+        else:
+            b = 0
+        #print(i,a,b,x+a,cmax+b,sc2[i,x+a],sc2[i,cmax+b])
+        #imgplot(sc2[i:i+1,:x2+1])
+        ab.append([a,b,i])
+            
+    for i in range(y,y2):
+        a,b,it = ab[i-y]
+        #print(a,b,x+a,cmax,cmax+b,x2)
+        #imgplot(sc2[i:i+1,:x2+1])
+        if a!=0 and b == 0:
+            sc2[i,x2-a-1] = sc2[i,x+a]
+            if i>y:
+                sc2[i,x2-ab[i-1-y][0]-1] = sc2[i,x+ab[i-1-y][0]]
+                
+        elif a==0 and b!=0:
+            sc2[i,cmax-b] = sc2[i,cmax+b]
+            if i>y:
+                sc2[i,cmax-ab[i-1-y][1]] = sc2[i,cmax+ab[i-1-y][1]]
+        '''       
+        else:
+            #print(sc2[i,x+a],sc2[i,cmax+b])
+            if sc2[i,x+a]<sc2[i,cmax+b]:
+                if a> x2-cmax-b:
+                    sc2[i,x+x2-cmax-b] = sc2[i,cmax+b]
+                sc2[i,x+a] = sc2[i,cmax+b]
             else:
-                a = 0
-            if np.nonzero(sc2[i,cmax:x2])[0].shape[0] !=0:
-                #print(i,sc2[i,cmax:x2],np.nonzero(sc2[i,cmax:x2]),np.max(np.nonzero(sc2[i,cmax:x2])))
-                b = np.max(np.nonzero(sc2[i,cmax:x2]))
-            else:
-                b = 0
-            print(i,a,b,x+a,cmax+b,sc2[i,x+a],sc2[i,cmax+b])
-            imgplot(sc2[i:i+1,:x2+1])
-            if a!=0 and b == 0:
-                sc2[i,x2-a] = sc2[i,x+a]
-            elif a==0 and b!=0:
-                sc2[i,cmax-b] = sc2[i,cmax+b]
-            else:
-                #print(sc2[i,x+a],sc2[i,cmax+b])
-                if sc2[i,x+a]<sc2[i,cmax+b]:
-                    if a> x2-cmax-b:
-                        sc2[i,x+x2-cmax-b] = sc2[i,cmax+b]
-                    sc2[i,x+a] = sc2[i,cmax+b]
-                else:
-                    if a<x2-cmax-b:
-                        sc2[i,x2-a] = sc2[i,x+a]
-                    sc2[i,cmax+b] = sc2[i,x+a]
-            #print('')
+                if a<x2-cmax-b:
+                    sc2[i,x2-a] = sc2[i,x+a]
+                sc2[i,cmax+b] = sc2[i,x+a]
+        '''     
+        #imgplot(sc2[i:i+1,:x2+1])
+        #print('')
             
     print('sc2 - 1')
     imgplot(sc2)
     
-    contours, _ = cv2.findContours(sc2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    contours.sort(key=cv2.contourArea, reverse=True)
-    cnt = contours[0]
-    x,y,w,h = cv2.boundingRect(cnt)
-    x2 = x+w
-    cmax = x + int((w+0.5)/2)
-    if x2-cmax > cmax-x:
-        x = 2*cmax - x2
-    else:
-        x2 = 2*cmax - x
-
-    print(np.sum(sc2[y:y+h,x:cmax]),np.sum(sc2[y:y+h,cmax:x2]))
-          
-    if np.sum(sc2[y:y+h,cmax:x2]) < np.sum(sc2[y:y+h,x:cmax]):
-        #imgplot(cv2.flip(sc2[y:y+h,x:cmax],1))
-        sc2[y:y+h,cmax:x2] = cv2.flip(sc2[y:y+h,x:cmax],1)
-    else:
-        #imgplot(cv2.flip(sc2[y:y+h,cmax:x2],1))
-        sc2[y:y+h,x:cmax] = cv2.flip(sc2[y:y+h,cmax:x2],1)
-            
-    print('sc2 - 2')
-    imgplot(sc2)
-    
-    contours, _ = cv2.findContours(sc2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    contours.sort(key=cv2.contourArea, reverse=True)
-    cnt = contours[0]
-    x,y,w,h = cv2.boundingRect(cnt)
     
     return x,y,w,h,sc2
 
@@ -659,37 +535,6 @@ def detect_color(img,bgrLower,bgrUpper):
     result = cv2.bitwise_and(img, img, mask=img_mask)
     return result
 
-#領域の最小列，最大列を計算
-#甲状腺の場合
-def measure_col_thy(img):
-    if len(img.shape)>2:
-        img = grayscale(img)
-    h,w  = img.shape[:2]
-    n_min = 0
-    n_max = 0
-    for i in range(w-1):
-        if np.count_nonzero(img[:,i]> 0)>0 and n_min==0 and np.count_nonzero(img[:,i+1]> 0)> 0:
-            n_min += 1
-            min_col = i
-        if np.count_nonzero(img[:,w-1-i]> 0)>0 and n_max==0 and np.count_nonzero(img[:,w-1-i-1]> 0)> 0:
-            n_max += 1
-            max_col = w-1-i
-    return min_col, max_col
-
-#甲状腺以外
-def measure_col(img):#関数名検討
-    img = grayscale(img)
-    h,w  = img.shape
-    n = 0
-    for i in range(w):
-        if np.count_nonzero(img[:,i]> 0)>0 and n==0 and np.count_nonzero(img[:,i+1]> 0)> 0:
-            n += 1
-            min_col = i
-        elif img[:,i].sum() == 0 and n==1:
-            n += 1
-            max_col = i
-    return min_col, max_col
-
 
 
 def detect_all(img,pt,cdict):
@@ -697,11 +542,12 @@ def detect_all(img,pt,cdict):
     h,w  = img.shape[:2]
     for part in ['T','B','M']:
         if 'T' not in part:
-            img = detect_color(img2,cdict[part+'L'],cdict[part+'U'])
+            img = detect_color(img,cdict[part+'L'],cdict[part+'U'])
 
         img0 = grayscale(img)
-        img0[img0>50] = 200
-        img0[img0<=50] = 0
+        imgplot(img0)
+        img0[img0>60] = 200
+        img0[img0<=60] = 0
 
         imgplot(img0)
         
@@ -739,20 +585,315 @@ def detect_all(img,pt,cdict):
 
 
 
+#アノテーション画像から甲状腺の中心、端を特定してプローブの位置を補正する
+
+#甲状腺全体における各列の幅を計算
+
+def calc_width(img,factor=0.3):
+    img = grayscale(img)
+    img[img<60] = 0
+    img[img!=0] = 240
+    _,w = img.shape
+    slist = []
+    
+    index = 0
+    for i in range(w):
+        k = img[:,i]
+        k = np.where(k>0)[0]
+        if len(k)>0:
+            mn = np.min(k)
+            width = np.max(k) - mn
+            # index, column, dist, width
+            slist.append([index,i,mn,width])
+            #print(index,i,k,mn,width)
+            index += 1
+    
+    slist = np.array(slist)
+    n = int(slist.shape[0]*factor)
+    
+    t_dist = slist[np.argsort(slist[:,2])[n],2]
+    t_width = slist[np.argsort(slist[:,3])[n],3]
+    
+    scol = np.intersect1d(slist[np.where(slist[:,3]<t_width)[0],1],slist[np.where(slist[:,2]<t_dist)[0],1])
+
+    img[:,scol] = 255
+    
+    scol2 = []
+    j = 0
+    for i in scol:
+        scol2.append([np.where(slist[:,1]==i)[0][0],i])
+    
+    scol = np.array(scol2)
+    imgplot(img)
+    
+    return scol,slist,t_width,t_dist
+
+
+#甲状腺の中心座標の特定
+# only for horizontal
+#幅が最大の幅の30%以下の列のなかで一番皮膚に近いところを中心として判定
+def detect_center(img,scol,slist):
+    
+    smin = 0
+    min_col = -1
+    for i in scol:
+        w = slist[i[0],3]
+        d = slist[i[0],2]
+        #print(i,w,d)
+        #print(np.sort(slist[:i[0],3])[int(i[0]*0.2)])
+        #print(np.sort(slist[i[0]:,3])[int((slist.shape[0]-i[0])*0.2)])
+        #print(np.min(slist[np.where(slist[:,2]<=d)[0],3]))
+        
+        if (w < np.sort(slist[:i[0],3])[int(i[0]*0.2)] and w < np.sort(slist[i[0]:,3])[int((slist.shape[0]-i[0])*0.2)]) or w <= np.min(slist[np.where(slist[:,2]<=d)[0],3]):
+            print(i,w,d,smin,2*w+d)
+            if smin ==0:
+                smin = 2*w+d
+                min_col = i[1]
+            elif smin>2*w + d:
+                smin = 2*w+d
+                min_col = i[1]
+                #print(i,w,d)
+    
+    img = grayscale(img)
+    img[:,min_col-1:min_col+1] = 255
+    imgplot(img)
+    
+    return min_col
+
+
+def detect_edge(img, slist, I1, edge_range=20): 
+    
+    img = grayscale(img)
+    img[img<60] = 0
+    img[img!=0] = 240
+    _,w = img.shape
+    le = -1
+    re = -1
+    direction = I1['direction']
+    shape = I1['shape']
+    side = I1['side']
+    if direction == 'horizontal':
+        if side == 'left' and slist[0,1]>5:
+            return slist[0,1],-1
+        if side == 'right' and slist[-1,1]<img.shape[1]-5:
+            return -1, slist[-1,1]
+    
+    if True:
+        if slist[0,1]>5:
+            le = slist[0,1]
+        else:
+            if np.max(slist[:6,3])<0.4*np.max(slist[:,3]):
+                le = slist[0,1]
+                
+                middle = slist[:,2] + 0.5*slist[:,3]
+                minc = np.argmin(middle[:50])
+                slope1, intercept1, r_1, p_value1, std_err1 = stats.linregress(np.arange(minc),middle[:minc])
+                c2 = min(minc,20)
+                slope2, intercept2, r_2, p_value2, std_err2 = stats.linregress(np.arange(2*c2),middle[minc-c2:minc+c2])
+                if slope1 < 0 and r_1*r_1>0.92 and slope2>slope1 and r_2*r_2<0.92:
+                    print('Left Trapezium')
+                    le = -1
+             
+        print(re)
+        if slist[-1,1]<img.shape[1]-20 and np.max(slist[-6:,3])<0.48*np.max(slist[:,3]):
+            re = slist[-1,1]
+        else:
+            if np.max(slist[-6:,3])<0.4*np.max(slist[:,3]):
+                re = slist[-1,1]
+                
+                minc = 50-np.min(np.where(middle[-50:]>(np.mean(middle[-50:]))))+1
+                slope1, intercept1, r_1, p_value1, std_err1 = stats.linregress(np.arange(minc),middle[-minc:])
+                c2 = min(minc,20)
+                slope2, intercept2, r_2, p_value2, std_err2 = stats.linregress(np.arange(2*c2),middle[-minc-c2-1:-minc+c2-1])
+                if slope1 > 0 and r_1*r_1>0.92 and slope2<slope1 and r_2*r_2<0.92:
+                    print('Right Trapezium')
+                    re = -1
+       
+    t_edge = (le, re)
+    return t_edge
+
+
+
+#スキーマのエッジの座標を計算
+def calc_schema_edge(sc2,I1):
+    
+    direction = I1['direction']
+    x,x2,y,y2 = I1['sc2_dim']
+    xp,xp2,yp,yp2 = I1['sh_dim']
+    edge = [-1,-1]
+    
+    if direction == 'vertical':
+        yl = int((yp+yp2)/2+0.5)
+        xl = int((xp+xp2)/2+0.5)
+        print(yl,xl)
+        for i in range(y2-y+1):
+            if sc2[yl-i,xl] > 160 and edge[0]<0:
+                edge[0] = yl-i
+                
+            if sc2[yl+i,xl] > 160 and edge[1]<0:
+                edge[1] = yl+i
+                
+            if edge[0]>=0 and edge[1]>=0:
+                break
+
+    else:
+        yl = int((yp+yp2)/2+0.5)
+        xl = int((xp+xp2)/2+0.5)
+        print(yl,xl)
+        for i in range(x2-x+1):
+            print(i,xl,yl,xl-i,sc2[yl,xl-i],'  ',xl+i,sc2[yl,xl+i])
+            if edge[0]<0 and sc2[yl,xl-i] > 160:
+                edge[0] = xl-i
+                
+            if edge[1]<0 and sc2[yl,xl+i] >160:
+                edge[1] = xl+i
+                
+            if edge[0]>=0 and edge[1]>=0:
+                break
+    
+    return edge
+
+
+def shift_probe(I1,sh,tste):
+    le,re = I1['t_edge']
+    t_center = I1['t_center']
+    _,n = I1['shape']
+    
+    xp,xp2,yp,yp2 = I1['sh_dim']
+        
+    if I1['direction'] == 'vertical':
+        top,bot = s_edge
+        shl = yp2 - yp  # probe length
+        if le<0 and re>=0:
+            end = int(bot + re*shl/n + 0.5)
+            start = end - shl
+            
+        if le>=0 and re<0:
+            start = int(top - le*shl/n + 0.5)
+            end = start + shl
+            
+        if le>=0 and re>=0:
+            start = int(top - le*shl/n + 0.5)
+            end = int(bot + re*shl/n + 0.5)
+            
+        else:
+            if yp2>bot:
+                end = bot
+                start = end - shl
+            elif yp<top:
+                start = top
+                end = start + shl
+            
+        print(yp,yp2)
+        imgplot(sh)
+        print(start,end)
+        sh = np.zeros(sh.shape)
+        sh[start:end,xp:xp2] = 250
+        s_schema['sh_dim'] = (xp,xp2,start,end)
+        imgplot(sh)
+        
+    else:
+        
+        side = I1['side']
+        l = xp2 - xp
+        s0,s1 = I1['s_edge']
+        cmax = int((I1['sc2_dim'][0] + I1['sc2_dim'][1])/2 + 0.5)
+        
+        print(t_center,t_edge,s0,s1,cmax)
+        
+        # shift
+        if t_center <0 and (t_edge[0]>0 or t_edge[1]>0):
+            if side == 'left':
+                print(1,I1['direction'],side)
+                a,_ = tste
+                start = s0 - a*l/n 
+                end = start + l
+                
+            else:
+                print(1,I1['direction'],side)
+                _,a = tste
+                end = s1 + a*l/n 
+                start = end - l
+        
+        
+        # shift
+        elif t_center>0 and (t_edge[0]<0 and t_edge[1]<0):
+            if side == 'left':
+                print(3,I1['direction'],side)
+                a = int(n/2 - t_center + 0.5)
+                mid = cmax + a*l/n
+                start = int(mid - l/2 + 0.5)
+                start = max(s0,start)
+                end = start + l
+                I1['side'] = 'lmiddle'
+                
+                
+            
+            elif side == 'right':
+                print(3,I1['direction'],side)
+                a = int(n/2 - t_center + 0.5)
+                mid = cmax + a*l/n
+                end = int(mid + l/2 + 0.5)
+                end = min(s1,end)
+                start = end - l
+                I1['side'] = 'rmiddle'
+        
+        # shift or stretch
+        elif t_center>0 and (t_edge[0]>0 or t_edge[1]>0):
+            # stretch
+            if not (t_edge[0]>0 and t_edge[1]>0):
+                if side == 'left':
+                    print(4,I1['direction'],side)
+                    a,te = tste
+                    b = te - t_center
+                    
+                    end = int((cmax - b*s0/(n-a))/(1-b/(n-a))+0.5)
+                    start = int((s0 - a*cmax/(n-b))/(1-a/(n-b)) +0.5)
+                    
+                elif side == 'right':
+                    print(4,I1['direction'],side)
+                    ts,te = tste
+                    a = n-te
+                    b = ts - t_center
+                    
+                    end = int((s1 - a*cmax/(n-b))/(1-a/(n-b))+0.5)
+                    start = int((cmax - b*s1/(n-a))/(1-b/(n-a)) +0.5)
+                    
+            # shift
+            else:
+                print(5,I1['direction'],side)
+                a = int(n/2 - t_center + 0.5)
+                mid = cmax + a*l/n
+                start = int(mid - l/2 + 0.5)
+                end = int(mid + l/2 + 0.5)
+                I1['side'] = 'middle'
+                
+        
+        print(yp,yp2)
+        imgplot(sh)
+        print(start,end)
+        sh = np.zeros(sh.shape)
+        sh[yp:yp2,start:end] = 250
+        I1['sh_dim'] = (start,end,yp,yp2)
+        imgplot(sh)
+    
+    return I1, sh
+
+
+# Executed after probe correction, changes when there is a change in length of probe
         
 #列番号から結節の相対距離を計算 (気道が見えない場合のみ)
-def dist_thy_nod(I1,df_US,s_schema):
+def dist_thy_nod(I1,df_US):
     
-    xp1,xp2,yp1,yp2 = s_schema['sh_dim']
+    xp1,xp2,yp1,yp2 = I1['sh_dim']
     
     for i in range(len(df_US)):
         if 'T' not in df_US.loc[i]['part']:
             
-            minc,maxc = df_US.loc[i]['min_col'],df_US.loc[i]['max_col']
+            minc,maxc = df_US.loc[i]['col'][0],df_US.loc[i]['col'][1]
             print(minc,maxc)
             
             if I1['direction'] == 'vertical':
-                print('haha')
                 yp2 = yp2-yp1
                 yp1 = 0
                 yn1,yn2 = int(yp1 + minc/I1['shape'][1]*(yp2-yp1) + 0.5), int(yp1 + maxc/I1['shape'][1]*(yp2-yp1) + 0.5)
@@ -769,384 +910,9 @@ def dist_thy_nod(I1,df_US,s_schema):
     return df_US
 
 
-
-#アノテーション画像から甲状腺の中心、端を特定してプローブの位置を補正する
-
-#甲状腺(thy)と結節(Nod)を抽出し，結合する
-def make_img_Thy_Nod_Mal(img,threshold = 20):
-
-    img = grayscale(img)
-    # 二値化(閾値を超えた画素を255にする。)
-    ret, img = cv2.threshold(img, threshold, 255, cv2.THRESH_BINARY)
-    imgplot(img)
-    
-    return img
-
-
-
-#外接矩形からの中心とプローブの位置関係から甲状腺の中心の方向を判定
-
-
-#甲状腺全体における各列の幅を計算
-def clac_width_thy(img_thy_nod):
-    m,n = img_thy_nod.shape
-    min_list = []
-    width_list = []
-    for i in range(n):
-        img_col = img_thy_nod[:,i]
-        if (img_col != 0).any():
-            nzero_list = np.where(img_col != 0)[0].tolist()
-            min_temp = min(nzero_list)
-            max_temp = max(nzero_list)
-        
-            width = max_temp - min_temp
-        else:
-            width = 0
-            min_temp = 0
-        
-        width_list.append(width)
-        min_list.append(min_temp)
-        
-    return min_list, width_list
-
-
-#甲状腺の中心があるか判定
-def judge_center_edge(min_width,max_width,img_thy_nod):
-    if min_width > max_width * 0.3:
-        center_exist = False
-    else:
-        center_exist = True
-    
-    return center_exist
-
-
-#甲状腺の中心座標の特定
-#幅が最大の幅の30%以下の列のなかで一番皮膚に近いところを中心として判定
-def detect_center_thy(width_list_judge, max_width, cen_rate = 0.3):
-    width_list_judge = np.array(width_list_judge)
-    cen_col_list = np.where((width_list_judge <= max_width * cen_rate) & (width_list_judge != 0))[0].tolist()
-    for i in cen_col_list:
-        row_temp = np.inf
-        for i in cen_col_list:
-            if row_temp > min_list[i]:
-                row_temp = min_list[i]
-                min_col = i
-    if thy_LR == 'right':
-        min_col = img0.shape[1] - 1 - min_col
-    
-    return min_col
-
-
-#スキーマのエッジの座標を計算
-def calc_schema_edge(img,thy_list,thy_LR,cd):
-    thy_temp = [i for i in thy_list if (i != img).any()]
-
-    edge_list = []
-    m,n = img.shape
-
-    #端点の座標計算
-    for thy in thy_temp:
-
-        x= thy[cd,:]
-        
-        plot_list = []
-        num = 0
-        
-        if thy_LR == 'left':
-            for i in range(n):
-                if x[n-1-i] > 0 and num == 0:
-                    num += 1
-                    plot_list.append(n-1-i)
-                elif x[n-1-i] > 0 and num == 1:
-                    plot_list.append(n-1-i)
-            
-                elif x[n-1-i] == 0 and num == 1:
-                    break
-        else:
-            for i,y in enumerate(x):
-                if y > 0 and num == 0:
-                    num += 1
-                    plot_list.append(i)
-                elif y > 0 and num == 1:
-                    plot_list.append(i)
-            
-                elif y == 0 and num == 1:
-                    break 
-        edge = int(statistics.median(plot_list))
-        edge_list.append(edge)
-
-    if len(set(edge_list))>1:
-        if Counter(edge_list).most_common(1)[0][0]/len(edge_list)>=0.5:
-            edge = Counter(edge_list).most_common(1)[0][0]
-        else:
-            print('error: 各画像におけるプローブの位置が一致しません。それぞれの画像を確認してください。')
-    else:
-        edge = edge_list[0]
-    #print('edge')
-    #print(edge)
-    #print('edge_list:',edge_list)
-    return edge
-
-
-def judge_edge(i0, img_thy_nod, thy_LR, edge_range=20): 
-    top,bottom,left,right = cut(i0)
-    l_edge,r_edge = measure_col_thy(img_thy_nod)
-    
-    print('left:{},right:{}'.format(left,right))
-    print('l_edge:{},r_edge:{}'.format(l_edge,r_edge))
-    
-    s_cen = np.zeros(i0.shape[1])
-    width_list= []
-    for i in range(img_thy_nod.shape[1]):
-        img_temp = img_thy_nod[:,i]
-        if (img_temp != 0).any():
-            nzero_list = np.where(img_temp != 0)[0].tolist()
-            min_temp = min(nzero_list)
-            max_temp = max(nzero_list)
-            width = max_temp - min_temp
-            width_list.append(int(width))
-            s_cen[i] = (min_temp + max_temp) / 2
-        else:
-            width_list.append(0)
-    
-    if (thy_LR == 'right' and left + edge_range <= l_edge) or (thy_LR =='left' and right - edge_range >= r_edge):
-        edge_exist = True
-    
-    elif (thy_LR == 'right' and s_cen[l_edge + 4] - 20 >= s_cen[l_edge + edge_range]) or (thy_LR == 'left' and s_cen[r_edge - 4] - 20 >= s_cen[r_edge - edge_range]):
-        edge_exist = False
-        print(s_cen[l_edge + 4])
-        print(s_cen[l_edge + edge_range])
-        
-    elif (thy_LR == 'right' and np.mean(np.array(width_list[l_edge:l_edge+5])) <= 20) or(thy_LR == 'left' and np.mean(np.array(width_list[r_edge-4:r_edge+1])) <= 20):
-        edge_exist  = True
-        
-    else:
-        edge_exist = False
-        
-        
-    return edge_exist
-
-
-#実際は left_edge_exist → up_edge_exist, right_edge_exist → bottom_edge_exist
-def judge_edge_vertical(i0, img_thy_nod, edge_range=40):
-    top,bottom,left,right = cut(i0)
-
-    l_edge, r_edge = measure_col_thy(img_thy_nod)
-    
-    print('left:{},right:{}'.format(left,right))
-    print('l_edge:{},r_edge:{}'.format(l_edge,r_edge))
-    #imgplot(i0[top:bottom,left:right])
-    s_cen = np.zeros(i0.shape[1])
-
-    width_list= []
-    for i in range(img_thy_nod.shape[1]):
-        img_temp = img_thy_nod[:,i]
-        if (img_temp != 0).any():
-            nzero_list = np.where(img_temp != 0)[0].tolist()
-            min_temp = min(nzero_list)
-            max_temp = max(nzero_list)
-            width = max_temp - min_temp
-            width_list.append(int(width))
-            s_cen[i] = (min_temp + max_temp) / 2
-        else:
-            width_list.append(0)
-
-    #print('left_state_1:',s_cen[l_edge + 4])
-    #print('left_state_2:',s_cen[l_edge + 20])
-    print(np.mean(np.array(width_list[l_edge:l_edge+5])))
-    #左(left)の判定
-    if left + edge_range <= l_edge:
-        #print('a1')
-        left_edge_exist = True
-    
-    elif s_cen[l_edge + 4] - 15 >= s_cen[l_edge + 20]:
-        #print('a2')
-        left_edge_exist = False
-        print('left_state_1:',s_cen[l_edge + 4])
-        print('left_state_2:',s_cen[l_edge + 20])
-        
-    elif np.mean(np.array(width_list[l_edge:l_edge+5])) <= 20:
-        #print('a3')
-        left_edge_exist  = True
-        
-    else:
-        #print('a4')
-        left_edge_exist = False
-    
-    print(np.mean(np.array(width_list[r_edge-4:r_edge+1])))
-    #print('right_state_1:',s_cen[r_edge - 4])
-    #print('right_state_2:',s_cen[r_edge - 20])
-    #右(right)の判定
-    if right - edge_range >= r_edge:
-       # print('b1')
-        right_edge_exist = True
-    elif s_cen[r_edge - 4] - 15 >= s_cen[r_edge - 20]:
-       # print('b2')
-        right_edge_exist = False
-        print('right_state_1:',s_cen[r_edge - 4])
-        print('right_state_2:',s_cen[r_edge - 20])
-
-    elif np.mean(np.array(width_list[r_edge-4:r_edge+1])) <= 20:
-        #print('b3')
-        right_edge_exist = True
-    
-    else:
-       # print('b4')
-        right_edge_exist = False
-
-
-    return left_edge_exist, right_edge_exist
-
-
-def edge_list_to_edge(edge_list):
-    if len(set(edge_list)) > 1:
-        if Counter(edge_list).most_common(1)[0][0]/len(edge_list)>=0.5:
-            edge = Counter(edge_list).most_common(1)[0][0]
-        else:
-            print('error: 各画像におけるプローブの位置が一致しません。それぞれの画像を確認してください。')
-    else:
-        edge = edge_list[0]
-    
-    return edge
-
-
-def calc_schema_edge_vertical(img,thy_list,cd):
-    thy_temp = [i for i in thy_list if (i != img).any()]
-
-    up_thy_edge_list = []    
-    bottom_thy_edge_list = []
-
-    m,n = img.shape
-
-    #端点の座標計算
-    for thy in thy_temp:
-        #imgplot(thy)
-        x = thy[:,cd]
-
-        num = 0
-        plot_list_up = []
-
-        #上方向
-        for i,y in enumerate(x):
-            if y > 0 and num == 0:
-                num += 1
-                plot_list_up.append(i)
-            elif y > 0 and num == 1:
-                plot_list_up.append(i)
-            
-            elif y == 0 and num == 1:
-                break 
-                
-        num = 0
-        plot_list_bottom = []
-        #下方向
-        for i in range(m):
-            if x[m-1-i] > 0 and num == 0:
-                num += 1
-                plot_list_bottom.append(m-1-i)
-            elif x[m-1-i] > 0 and num == 1:
-                plot_list_bottom.append(m-1-i)
-            
-            elif x[m-1-i] == 0 and num == 1:
-                break
-                
-        if len(plot_list_up) > 0 and len(plot_list_bottom) > 0:
-            up_thy_edge = int(statistics.median(plot_list_up))
-            bottom_thy_edge = int(statistics.median(plot_list_bottom))
-            
-            if up_thy_edge != bottom_thy_edge:
-                bottom_thy_edge_list.append(bottom_thy_edge)
-                up_thy_edge_list.append(up_thy_edge)
-        
-    print(up_thy_edge_list)
-    print(bottom_thy_edge_list)
-    up_thy_edge = edge_list_to_edge(up_thy_edge_list)
-    bottom_thy_edge = edge_list_to_edge(bottom_thy_edge_list)
-
-    return up_thy_edge, bottom_thy_edge
-
-
-
 #座標に換算
-
-def recalc_for_plot(l_x, l_y, p_x, p_y, p_w, p_h, x, y, w, h):
-    l_x = (l_x - p_x) / p_w * w + x
-    l_y = (l_y - p_y) / p_h * h + y
-    return l_x, l_y
-
-#腫瘍の位置をschemaの座標に変換
-def recalc_probe(df, p_x, p_y, p_w, p_h, x, y, w, h, part_name):
-    min_list = []
-    max_list = []
-
-    for i in range(len(df)):
-        cd = df['cd'][i]
-        th_min = df['th_min'][i]
-        th_max = df['th_max'][i]
-        min_col = df['min_col'][i]
-        max_col = df['max_col'][i]
-
-        if df['direction'][i] == 'vertical':
-            nod_min_y = th_min+(th_max-th_min)*min_col
-            nod_max_y = th_min+(th_max-th_min)*max_col
-            
-            cd, nod_min_y = recalc_for_plot(cd, nod_min_y, p_x, p_y, p_w, p_h, x, y, w, h)
-            _, nod_max_y = recalc_for_plot(cd, nod_max_y, p_x, p_y, p_w, p_h, x, y, w, h)
-            cd = int(Decimal(str(cd)).quantize(Decimal('0'), rounding=ROUND_HALF_UP))
-            nod_min_y = int(Decimal(str(nod_min_y)).quantize(Decimal('0'), rounding=ROUND_HALF_UP))
-            nod_max_y = int(Decimal(str(nod_max_y)).quantize(Decimal('0'), rounding=ROUND_HALF_UP)) 
-            nod_min = [nod_min_y, cd]
-            nod_max = [nod_max_y, cd]
-        else:
-            nod_min_x = th_min+(th_max-th_min)*min_col
-            nod_max_x = th_min+(th_max-th_min)*max_col
-            nod_min_x, cd = recalc_for_plot(nod_min_x, cd, p_x, p_y, p_w, p_h, x, y, w, h)
-            nod_max_x, _ = recalc_for_plot(nod_max_x, cd, p_x, p_y, p_w, p_h, x, y, w, h)
-            cd = int(Decimal(str(cd)).quantize(Decimal('0'), rounding=ROUND_HALF_UP))
-            nod_min_x = int(Decimal(str(nod_min_x)).quantize(Decimal('0'), rounding=ROUND_HALF_UP))
-            nod_max_x = int(Decimal(str(nod_max_x)).quantize(Decimal('0'), rounding=ROUND_HALF_UP)) 
-            
-            nod_min = [cd, nod_min_x]
-            nod_max = [cd, nod_max_x]
-    
-        min_list.append(nod_min)
-        max_list.append(nod_max)
-
-    if part_name == 'nodule':
-        df['nod_min'] = pd.Series(min_list)
-        df['nod_max'] = pd.Series(max_list)
-    else:
-        df['mal_min'] = pd.Series(min_list)
-        df['mal_max'] = pd.Series(max_list)
-
-    return df
-
-def add_nod_id(df):
-    image_name = df['image_name']
-    part_number = str(df['part_number'])
-    image_name = image_name.replace('annotatedImage','')
-    image_name = str(int(image_name))
-    if df['direction'] == 'vertical':
-        direction = 'V'
-    else:
-        direction = 'H'
-        
-    part_id = image_name + direction + 'B' + part_number
-    return part_id
-
-def add_mal_id(df):
-    image_name = df['image_name']
-    part_number = str(df['part_number'])
-    image_name = image_name.replace('annotatedImage','')
-    image_name = str(int(image_name))
-    if df['direction'] == 'vertical':
-        direction = 'V'
-    else:
-        direction = 'H'
-        
-    part_id = image_name + direction + 'M' + part_number
-    return part_id
-
+def transfer_schema(I1,sc2):
+    None
 
 #複数のエコー画像から結節のクラスター作成を行う
 
