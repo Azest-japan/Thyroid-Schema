@@ -26,20 +26,22 @@ cdict['BU'] = np.array([60, 100, 250])
 
 #Malignant
 cdict['ML'] =  np.array([180, 80, 0])
-cdict['MU'] = np.array([250, 120, 20])
+cdict['MU'] = np.array([255, 120, 20])
 
 pdict = {}
 pdict['B'] = (200,100,0)
 pdict['M'] = (20,80,240)
 
 #pt = ['205','11']
+
 cs2 = np.uint8(np.ones((hs,ws,3))*255)
 cs2[:,:,:] = cs[ys:ys+hs,xs:xs+ws].reshape((hs,ws,1))
 cs2[cs2<120] = 0
 cs2[cs2>120] = 255
-for ino in ['03','04','10','11','16','17','18','19','20']:
+intersection = []
+for ino in ['02','05','07',10,11,12,13,14,15,17,19]:
 
-    pt = ['211',str(ino)]
+    pt = ['206',str(ino)]
 
     img = cv2.imread('/test/Ito/Ischema/'+pt[0]+'_Image0'+pt[1]+'.jpg')
     t,b,l,r = cut(img)
@@ -63,12 +65,13 @@ for ino in ['03','04','10','11','16','17','18','19','20']:
     #I1, sh = shift_probe(I1,sh,(slist[0,1],slist[-1,1]))
 
     df_US = dist_thy_nod(I1,df_US)
-    df_US = transfer_schema(I1,df_US)
+    df_US,intersection = transfer_schema(I1,df_US,intersection)
     fig = plt.figure()
     print('haha')
     cs2 = plot_schema(cs2,df_US,pdict,I1)
 
-cv2.imwrite('/test/Ito/sc214-.jpg',cs2)
+cv2.imwrite('/test/Ito/sc206-.jpg',cs2)
+
 
 '''
 

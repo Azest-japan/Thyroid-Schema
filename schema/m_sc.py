@@ -1152,7 +1152,7 @@ def dist_thy_nod(I1,df_US):
 
 
 #座標に換算
-def transfer_schema(I1,df_US,sm = (684,636)):
+def transfer_schema(I1,df_US,intersection,sm = (684,636)):
     
     x1,y1 = I1['sc2_dim'][1] - I1['sc2_dim'][0],I1['sc2_dim'][3] - I1['sc2_dim'][2]
     x2,y2 = sm
@@ -1161,10 +1161,17 @@ def transfer_schema(I1,df_US,sm = (684,636)):
             p1,p2,q1,q2 = df_US.loc[i]['sc_points']
             p1 = int(p1*x2/x1+0.5)
             p2 = max(p1+1,int(p2*x2/x1+0.5))
+              
             q1 = int(q1*y2/y1+0.5)
             q2 = max(q1+1,int(q2*y2/y1+0.5))
             df_US.at[i,'sc_points'] =  p1,p2,q1,q2
-    return df_US
+            if I1['direction'] == 'vertical':
+                x = int((p1+p2)/2)
+                intersection.append([I1['direction'][0],(x-2,x+3,q1,q2)])
+            else:
+                y = int((q1+q2)/2)
+                intersection.append([I1['direction'][0],(p1,p2,y-2,y+3)])
+    return df_US,intersection
     
                   
 def plot_schema(cs2,df_US,pdict,I1):
