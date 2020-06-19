@@ -260,7 +260,10 @@ def thyroid_measure(sc,sh,direction,pl=True):
                     col_num_list.append(i)
                     
         print(col_num_list)
-        cd = int(statistics.median(col_num_list))
+        if len(col_num_list)!=0:
+            cd = int(statistics.median(col_num_list))
+        else:
+            cd = cd = np.argmax(sh.sum(axis=0))
         sc_copy[:,cd] = [50,200,50]
         
     elif direction == 'horizontal':
@@ -291,8 +294,11 @@ def thyroid_measure(sc,sh,direction,pl=True):
             else:
                 if row_len > 0.6 * row_max and (row_list[i-1]> 0.6 * row_max or row_list[i+1] > 0.6 * row_max):
                     row_num_list.append(i)
-
-        cd = int(statistics.median(row_num_list))     
+                    
+        if len(row_num_list)!=0:
+            cd = int(statistics.median(row_num_list))
+        else:
+            cd = np.argmax(sh.sum(axis=1))
         sc_copy[cd,:] = [50,200,50]
     
     if pl == True:
@@ -434,9 +440,9 @@ def make_boundingRect(sc2):
     
     print("{} contours.".format(len(contours)))
 
-    fig, ax = plt.subplots(figsize=(8, 8))
-    draw_contours(ax, sc2, contours)
-    plt.show()
+    #fig, ax = plt.subplots(figsize=(8, 8))
+    #draw_contours(ax, sc2, contours)
+    #plt.show()
      
     x2 = x + w
     y2 = y + h
@@ -523,6 +529,143 @@ def make_boundingRect(sc2):
     return x,y,w,h,sc2
 
 
+# Process the above code
+def process(img):
+
+    dst,ct = thyroid_detect(img,pl=False)
+    sc,_ = thyroid_trim(img,dst,ct,pl=False)
+    sh,direction = probe_detect(sc,pl=False)
+
+    cmax,cd = thyroid_measure(sc,sh,direction,pl=False)
+    sc1 = grayscale(sc)
+    sc1[sh>0] = 0
+    contours, _ = cv2.findContours(sh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours.sort(key=cv2.contourArea, reverse=True)
+    xp,yp,wp,hp = cv2.boundingRect(contours[0])
+    if direction == 'horizontal':
+        if len(contours)>1:
+            xp1,yp1,wp1,hp1 = cv2.boundingRect(contours[1])
+            sc1[yp:yp+hp,xp:xp1+wp1] = 0
+        else:
+            sc1[yp:yp+hp,xp:xp+wp] = 0
+    else:
+        if len(contours)>1:
+            xp1,yp1,wp1,hp1 = cv2.boundingRect(contours[1])
+            sc1[yp:yp1+hp1,xp:xp+wp] = 0
+        else:
+            sc1[yp:yp+hp,xp:xp+wp] = 0
+    
+    sh2 = np.uint8(np.zeros(sh.shape))
+    sh2[yp:yp+hp,xp:xp+wp] = sh[yp:yp+hp,xp:xp+wp]
+    sh = sh2
+    
+    sc1[sc1<140] = 0
+    m_sc1,n_sc1 = sc1.shape
+    argsort = np.flip(np.argsort(np.sum(sc1[:m_sc1,:],axis=0)))
+    neck = [argsort[np.where(argsort<cd)[0][0]],argsort[np.where(argsort>cd)[0][0]]]
+    
+    sc1 = sc1[:,neck[0]+2:neck[1]-2]
+    sh = sh[:,neck[0]+2:neck[1]-2]
+    
+    cmax = cmax - neck[0] - 2
+
+    #imgplot(sc1)
+
+    w = sc1.shape[1]
+    
+    # Up
+    sm = []
+    for i in range(int((sc1.shape[0])/2+0.5)):
+        s = 0
+        for j in range(w):
+            yd = int(32*j*(w-j)/(w*w) + i + 0.5)
+            s += sc1[yd,j]
+        sm.append(s)
+
+    sm2 = np.where(np.array(sm)==0)[0]
+    up = 0
+    for i in range(2,len(sm2)):
+        print(sm2[i]-sm2[i-1],sm2[i-1] - sm2[i-2])
+        if sm2[i]-sm2[i-1] > 2*(sm2[i-1] - sm2[i-2]):
+            up = sm2[i]+8
+            print(up)
+            break
+
+    sc1[:up] = 0
+
+    # Down
+    sm = []
+    for i in range(int(sc1.shape[0]/2),sc1.shape[0]-4):
+        s = 0
+        for j in range(w):
+            yd = int(16*j*(w-j)/(w*w) + i + 0.5)
+            s += sc1[yd,j]
+        sm.append([i,s])
+        
+    temp = np.where(np.array(sm)[:,1]==0)[0]
+    if len(temp)!=0:
+        down = sm[temp[0]][0] + 5
+        sc1[down:] = 0
+
+    x,y,w,h,sc2 = make_boundingRect(sc1)
+
+    cmax = x+int((w+0.5)/2)
+
+    xp,yp,wp,hp,sh = clean_probe(sh,direction)
+    #shift
+    #length = 5
+    #sh = cv2.rectangle(np.zeros(sh.shape),(x,y-length),(x+w-1,y-length+h),color=250,thickness=-1)
+    
+    '''
+    d = []
+    d2 = []
+    for i in range(w):
+        s = np.where(sc2[:,x+i]>0)
+        d.append((np.max(s),np.min(s),i))
+        if len(d)>1:
+            d2.append([d[i][0] - d[i-1][0], d[i][1] - d[i-1][1]])
+            #print(i,d[i],d2[i-1])
+
+    diff = np.max(d2,axis=0)[0:2] - np.min(d2,axis=0)[0:2]
+    print(diff)
+    if np.max(diff) > 32:
+        
+        # Multiple gaps not possible
+        
+        c = np.argmax(diff)
+        if np.argmax(np.array(d2)[:,c]) < np.argmin(np.array(d2)[:,c]):
+            y1,x1 = d[np.argmax(np.array(d2)[:,c])][c],x+d[np.argmax(np.array(d2)[:,c])][2]
+            y2,x2 = d[np.argmin(np.array(d2)[:,c])+1][c],x+d[np.argmin(np.array(d2)[:,c])+1][2]
+        else:
+            y1,x1 = d[np.argmax(np.array(d2)[:,c])+1][c],x+d[np.argmax(np.array(d2)[:,c])+1][2]
+            y2,x2 = d[np.argmin(np.array(d2)[:,c])][c],x+d[np.argmin(np.array(d2)[:,c])][2]
+
+        if np.sqrt((y1-y2)*(y1-y2)+(x1-x2)*(x1-x2))<8:
+            sc2 = cv2.line(sc2,(x1,y1),(x2,y2),255,1)
+    
+    '''
+    #imgplot(sc2)
+    #imgplot(sc2[y:y+h,x:x+w])
+
+    sc = grayscale(cv2.imread('/test/Ito/schema.png'))
+    contours, _ = cv2.findContours(sc, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours.sort(key=cv2.contourArea, reverse=True)
+    cnt = contours[0]
+    x2,y2,w2,h2 = cv2.boundingRect(cnt)
+    
+    sc = sc[y2:y2+h2,x2:x2+w2]
+    sc = cv2.resize(sc, (w,h),interpolation = cv2.INTER_AREA)
+    sc2[y:y+h,x:x+w] = sc
+    sc2[sc2<100] = 0
+    
+    side='right'
+    
+    if int(xp+(wp)/2+0.5) < int(x+(w)/2+0.5):
+        side = 'left'
+    print(int(xp+(wp)/2+0.5),int(x+(w)/2+0.5))
+    
+    return direction, side, (x,x+w,y,y+h), (xp,xp+wp,yp,yp+hp) , sc2, sh
+
 
 '''
 Annotation
@@ -587,7 +730,6 @@ def detect_all(img,pt,cdict):
 
 
 #アノテーション画像から甲状腺の中心、端を特定してプローブの位置を補正する
-
 #甲状腺全体における各列の幅を計算
 
 def calc_width(img,factor=0.27):
@@ -645,7 +787,7 @@ def detect_center(img,scol,slist):
         #print(np.sort(slist[i[0]:,3])[int((slist.shape[0]-i[0])*0.2)])
         #print(np.min(slist[np.where(slist[:,2]<=d)[0],3]))
         
-        if i[0]>=10 and ((w < np.sort(slist[:i[0],3])[int(i[0]*0.2)] and w < np.sort(slist[i[0]:,3])[int((slist.shape[0]-i[0])*0.2)]) or (w <= np.min(slist[np.where(slist[:,2]<d)[0],3]) and (w < np.sort(slist[:i[0],3])[int(i[0]*0.3)] and w < np.sort(slist[i[0]:,3])[int((slist.shape[0]-i[0])*0.3)]))):
+        if i[0]>=10 and ((w < np.sort(slist[:i[0],3])[int(i[0]*0.2)] and w < np.sort(slist[i[0]:,3])[int((slist.shape[0]-i[0])*0.2)]) or (w < np.min(slist[np.where(slist[:,2]<=d)[0],3]) and (w < np.sort(slist[:i[0],3])[int(i[0]*0.3)] and w < np.sort(slist[i[0]:,3])[int((slist.shape[0]-i[0])*0.3)]))):
             print(i,w,d,smin,2*w+d)
             if smin ==0:
                 smin = 2*w+d
@@ -680,36 +822,53 @@ def detect_edge(img, slist, I1, edge_range=20):
             return -1, slist[-1,1]
     
     if True:
-        if slist[0,1]>5:
+        middle = slist[:,2] + 0.5*slist[:,3] # center of thyroid
+        plt.plot(np.arange(middle.shape[0]),middle)
+        if slist[0,1]>25:
             le = slist[0,1]
         else:
             if np.max(slist[:6,3])<0.4*np.max(slist[:,3]):
                 le = slist[0,1]
                 
-                middle = slist[:,2] + 0.5*slist[:,3]
-                minc = np.argmin(middle[:50])
-                slope1, intercept1, r_1, p_value1, std_err1 = stats.linregress(np.arange(minc),middle[:minc])
-                c2 = min(minc,20)
-                slope2, intercept2, r_2, p_value2, std_err2 = stats.linregress(np.arange(2*c2),middle[minc-c2:minc+c2])
-                if slope1 < 0 and r_1*r_1>0.92 and slope2>slope1 and r_2*r_2<0.92:
-                    print('Left Trapezium')
-                    le = -1
+                minc = np.argmin(middle[:80])
+                print(minc)
+                if minc!=0:
+                    slope1, intercept1, r_1, p_value1, std_err1 = stats.linregress(np.arange(minc),middle[:minc])
+                    c2 = min(minc,20)
+                    slope2, intercept2, r_2, p_value2, std_err2 = stats.linregress(np.arange(2*c2),middle[minc-c2:minc+c2])
+                    if slope1 < 0 and r_1*r_1>0.92 and slope2>slope1 and r_2*r_2<0.92:
+                        print('Left Trapezium')
+                        le = -1
+                else:
+                    s = slist[:,2]
+                    e = slist[:,2] + slist[:,3]
+                    if (min(np.abs(e[10]-e[1]),np.abs(s[10] - s[1]))>10 or max(np.abs(e[10]-e[1]),np.abs(s[10] - s[1]))>20)  and (np.abs(e[10]-e[1])*2 < np.abs(s[10] - s[1]) or np.abs(e[10]-e[1]) > 2*np.abs(s[10] - s[1])):
+                        le = -1
              
-        print(re)
+        #print(re)
         if slist[-1,1]<img.shape[1]-20 and np.max(slist[-6:,3])<0.48*np.max(slist[:,3]):
             re = slist[-1,1]
         else:
-            if np.max(slist[-6:,3])<0.4*np.max(slist[:,3]):
+            if np.max(slist[-20:-10,3])<0.4*np.max(slist[:,3]):
                 re = slist[-1,1]
                 
-                minc = 50-np.min(np.where(middle[-50:]>(np.mean(middle[-50:]))))+1
-                slope1, intercept1, r_1, p_value1, std_err1 = stats.linregress(np.arange(minc),middle[-minc:])
+                tmax = 80 - np.argmax(middle[-80:])
+                minc = 80+tmax-np.min(np.where(middle[-80-tmax:-tmax]>(np.mean(middle[-80-tmax:-tmax])))) + 1
+                #print(minc,middle[-minc:])
+                slope1, intercept1, r_1, p_value1, std_err1 = stats.linregress(np.arange(minc-tmax),middle[-minc:-tmax])
                 c2 = min(minc,20)
                 slope2, intercept2, r_2, p_value2, std_err2 = stats.linregress(np.arange(2*c2),middle[-minc-c2-1:-minc+c2-1])
-                if slope1 > 0 and r_1*r_1>0.92 and slope2<slope1 and r_2*r_2<0.92:
+                print(minc,tmax,slope1,slope2,r_1*r_1,r_2*r_2)
+                if (slope1 > 0 and r_1*r_1>0.956) or (slope2<slope1 and r_1*r_1>0.92 and r_2*r_2<0.92):
                     print('Right Trapezium')
                     re = -1
-       
+                else:
+                    s = slist[:,2]
+                    e = slist[:,2] + slist[:,3]
+                    if (min(np.abs(e[-10]-e[-1]),np.abs(s[-10] - s[-1]))>10 or max(np.abs(e[-10]-e[-1]),np.abs(s[-10] - s[-1]))>20)  and (np.abs(e[-10]-e[-1])*2 < np.abs(s[-10] - s[-1]) or np.abs(e[-10]-e[-1]) > 2*np.abs(s[-10] - s[-1])):
+                        re = -1
+                    
+                    
     t_edge = (le, re)
     return t_edge
 
@@ -728,32 +887,91 @@ def calc_schema_edge(sc2,I1):
         xl = int((xp+xp2)/2+0.5)
         print(yl,xl)
         for i in range(y2-y+1):
-            if sc2[yl-i,xl] > 160 and edge[0]<0:
+
+            if edge[0]<0 and sc2[yl-i,xl] > 160:
                 edge[0] = yl-i
                 
-            if sc2[yl+i,xl] > 160 and edge[1]<0:
+            if edge[1]<0 and sc2[yl+i,xl] > 160:
                 edge[1] = yl+i
                 
             if edge[0]>=0 and edge[1]>=0:
                 break
+        if edge[0]<0 and edge[1]>0: 
+            yl = yp2
+            xl = int((xp+xp2)/2+0.5)
+            print(yl,xl)
+            edge = [-1,-1]
+            for i in range(y2-y+1):
 
+                if edge[0]<0 and sc2[yl-i,xl] > 160:
+                    edge[0] = yl-i
+
+                if edge[1]<0 and sc2[yl+i,xl] > 160:
+                    edge[1] = yl+i
+
+                if edge[0]>=0 and edge[1]>=0:
+                    break
+        elif edge[0]>0 and edge[1]<0: 
+            yl = yp1
+            xl = int((xp+xp2)/2+0.5)
+            print(yl,xl)
+            edge = [-1,-1]
+            for i in range(y2-y+1):
+
+                if edge[0]<0 and sc2[yl-i,xl] > 160:
+                    edge[0] = yl-i
+
+                if edge[1]<0 and sc2[yl+i,xl] > 160:
+                    edge[1] = yl+i
+
+                if edge[0]>=0 and edge[1]>=0:
+                    break
+                    
     else:
         yl = int((yp+yp2)/2+0.5)
         xl = int((xp+xp2)/2+0.5)
         print(yl,xl)
         for i in range(x2-x+1):
-            #print(i,xl,yl,xl-i,sc2[yl,xl-i],'  ',xl+i,sc2[yl,xl+i])
+                #print(i,xl,yl,xl-i,sc2[yl,xl-i],'  ',xl+i,sc2[yl,xl+i])
             if edge[0]<0 and sc2[yl,xl-i] > 160:
                 edge[0] = xl-i
-                
+
             if edge[1]<0 and sc2[yl,xl+i] >160:
                 edge[1] = xl+i
-                
+
             if edge[0]>=0 and edge[1]>=0:
                 break
+                
+        if edge[0]<0 and edge[1]>0: 
+            yl = int((yp+yp2)/2+0.5)
+            xl = xp2
+            edge = [-1,-1]
+            for i in range(x2-x+1):
+                #print(i,xl,yl,xl-i,sc2[yl,xl-i],'  ',xl+i,sc2[yl,xl+i])
+                if edge[0]<0 and sc2[yl,xl-i] > 160:
+                    edge[0] = xl-i
+
+                if edge[1]<0 and sc2[yl,xl+i] >160:
+                    edge[1] = xl+i
+
+                if edge[0]>=0 and edge[1]>=0:
+                    break
+        elif edge[0]>0 and edge[1]<0: 
+            yl = int((yp+yp2)/2+0.5)
+            xl = xp1
+            edge = [-1,-1]
+            for i in range(x2-x+1):
+                #print(i,xl,yl,xl-i,sc2[yl,xl-i],'  ',xl+i,sc2[yl,xl+i])
+                if edge[0]<0 and sc2[yl,xl-i] > 160:
+                    edge[0] = xl-i
+
+                if edge[1]<0 and sc2[yl,xl+i] >160:
+                    edge[1] = xl+i
+
+                if edge[0]>=0 and edge[1]>=0:
+                    break
     
     return edge
-
 
 
 def shift_probe(I1,sh,tste):
@@ -764,21 +982,28 @@ def shift_probe(I1,sh,tste):
     xp,xp2,yp,yp2 = I1['sh_dim']
         
     if I1['direction'] == 'vertical':
-        top,bot = s_edge
+        top,bot = I1['s_edge']
         shl = yp2 - yp  # probe length
         if le<0 and re>=0:
-            end = int(bot + re*shl/n + 0.5)
+            print('right edge',bot,re,n,shl)
+            print(bot,re,n,shl)
+            end = int(bot + (n-re)*shl/n + 0.5)
             start = end - shl
             
-        if le>=0 and re<0:
+        elif le>=0 and re<0:
+            print('left edge',top,le,n,shl)
             start = int(top - le*shl/n + 0.5)
             end = start + shl
             
-        if le>=0 and re>=0:
+        elif le>=0 and re>=0:
+            print('two edges',top,bot,le,re,n,shl)
             start = int(top - le*shl/n + 0.5)
-            end = int(bot + re*shl/n + 0.5)
-            
+            end = int(bot + (n-re)*shl/n + 0.5)
+        
         else:
+            start = yp
+            end = yp2
+            print('no edge')
             if yp2>bot:
                 end = bot
                 start = end - shl
@@ -786,12 +1011,12 @@ def shift_probe(I1,sh,tste):
                 start = top
                 end = start + shl
             
-        print(yp,yp2)
+        print('y',yp,yp2)
         imgplot(sh)
-        print(start,end)
+        print('se',start,end)
         sh = np.zeros(sh.shape)
         sh[start:end,xp:xp2] = 250
-        s_schema['sh_dim'] = (xp,xp2,start,end)
+        I1['sh_dim'] = (xp,xp2,start,end)
         imgplot(sh)
         
     else:
@@ -802,27 +1027,32 @@ def shift_probe(I1,sh,tste):
         cmax = int((I1['sc2_dim'][0] + I1['sc2_dim'][1])/2 + 0.5)
         t_edge = I1['t_edge']
         print(t_center,t_edge,s0,s1,cmax)
-        
+        start = -1
+        end = -1
         # shift
+        
+        '''
         if t_center <0 and (t_edge[0]>0 or t_edge[1]>0):
             if side == 'left':
-                print(1,I1['direction'],side)
                 a,_ = tste
+                print(1,I1['direction'],side,s0,a,l,n)
                 start = int(s0 - a*l/n + 0.5)
                 end = start + l
                 
             else:
-                print(1,I1['direction'],side)
                 _,a = tste
+                a = n-a
+                print(1,I1['direction'],side,s1,a,l,n)
                 end = int(s1 + a*l/n  + 0.5)
                 start = end - l
-        
+        '''
         
         # shift
-        elif t_center>0 and (t_edge[0]<0 and t_edge[1]<0):
+        if t_center>0 and (t_edge[0]<0 and t_edge[1]<0):
             if side == 'left':
-                print(3,I1['direction'],side)
+                
                 a = int(n/2 - t_center + 0.5)
+                print(3,I1['direction'],side,s0,a,l,n)
                 mid = cmax + a*l/n
                 start = int(mid - l/2 + 0.5)
                 start = max(s0,start)
@@ -832,8 +1062,9 @@ def shift_probe(I1,sh,tste):
                 
             
             elif side == 'right':
-                print(3,I1['direction'],side)
+                
                 a = int(n/2 - t_center + 0.5)
+                print(3,I1['direction'],side,s1,a,l,n)
                 mid = cmax + a*l/n
                 end = int(mid + l/2 + 0.5)
                 end = min(s1,end)
@@ -845,19 +1076,20 @@ def shift_probe(I1,sh,tste):
             # stretch
             if not (t_edge[0]>0 and t_edge[1]>0):
                 if side == 'left':
-                    print(4,I1['direction'],side)
+                    
                     a,te = tste
                     b = te - t_center
+                    print(4,I1['direction'],side,s0,a,b,' ',l,n)
                     
                     end = int((cmax - b*s0/(n-a))/(1-b/(n-a))+0.5)
                     start = int((s0 - a*cmax/(n-b))/(1-a/(n-b)) +0.5)
                     
                 elif side == 'right':
-                    print(4,I1['direction'],side)
+                    
                     ts,te = tste
                     a = n-te
                     b = ts - t_center
-                    
+                    print(4,I1['direction'],side,s1,a,b,' ',l,n)
                     end = int((s1 - a*cmax/(n-b))/(1-a/(n-b))+0.5)
                     start = int((cmax - b*s1/(n-a))/(1-b/(n-a)) +0.5)
                     
@@ -870,10 +1102,12 @@ def shift_probe(I1,sh,tste):
                 end = int(mid + l/2 + 0.5)
                 I1['side'] = 'middle'
                 
-        
         print(yp,yp2,xp,xp2)
         imgplot(sh)
         print(start,end)
+        if start == -1 and end == -1:
+            return I1,sh
+        
         if end > sh.shape[1]:
              sh = np.zeros((sh.shape[0],end+1))
         elif start < 0:
@@ -894,6 +1128,7 @@ def shift_probe(I1,sh,tste):
 def dist_thy_nod(I1,df_US):
     
     xp1,xp2,yp1,yp2 = I1['sh_dim']
+    x1,x2,y1,y2 = I1['sc2_dim']
     
     for i in range(len(df_US)):
         if 'T' not in df_US.loc[i]['part']:
@@ -902,25 +1137,55 @@ def dist_thy_nod(I1,df_US):
             print(minc,maxc)
             
             if I1['direction'] == 'vertical':
-                yp2 = yp2-yp1
-                yp1 = 0
+                
                 yn1,yn2 = int(yp1 + minc/I1['shape'][1]*(yp2-yp1) + 0.5), int(yp1 + maxc/I1['shape'][1]*(yp2-yp1) + 0.5)
                 xn1,xn2 = int(xp1 + (xp2-xp1)/4 + 0.5), int(xp1 + 3*(xp2-xp1)/4+0.5)
-                print(yn1,yn2,xn1,xn2)
+                print(yn1-y1,yn2-y1,xn1-x1,xn2-x1)
             else:
-                xp2 = xp2 - xp1
-                xp1 = 0
+                
                 xn1,xn2 = int(xp1 + minc/I1['shape'][1]*(xp2-xp1) + 0.5), int(xp1 + maxc/I1['shape'][1]*(xp2-xp1) + 0.5)
                 yn1,yn2 = int(yp1 + (yp2-yp1)/4 + 0.5), int(yp1 + 3*(yp2-yp1)/4+0.5)
 
-            df_US.loc[i]['sc_points'] = (xn1,xn2,yn1,yn2)
+            df_US.at[i,'sc_points'] = (xn1-x1,xn2-x1,yn1-y1,yn2-y1)
     
     return df_US
 
 
 #座標に換算
-def transfer_schema(I1,sc2):
-    None
+def transfer_schema(I1,df_US,sm = (684,636)):
+    
+    x1,y1 = I1['sc2_dim'][1] - I1['sc2_dim'][0],I1['sc2_dim'][3] - I1['sc2_dim'][2]
+    x2,y2 = sm
+    for i in range(len(df_US)):
+        if 'T' not in df_US.loc[i]['part']: 
+            p1,p2,q1,q2 = df_US.loc[i]['sc_points']
+            p1 = int(p1*x2/x1+0.5)
+            p2 = max(p1+1,int(p2*x2/x1+0.5))
+            q1 = int(q1*y2/y1+0.5)
+            q2 = max(q1+1,int(q2*y2/y1+0.5))
+            df_US.at[i,'sc_points'] =  p1,p2,q1,q2
+    return df_US
+    
+                  
+def plot_schema(cs2,df_US,pdict,I1):
+    
+    for i in range(len(df_US)):
+        if 'T' not in df_US.loc[i]['part']: 
+            x1,x2,y1,y2 = df_US.loc[i]['sc_points']
+            print(df_US.loc[i]['part'],x1,x2,y1,y2,cs2.shape)
+            if I1['direction'] == 'vertical':
+                x = int((x1+x2)/2)
+                cs2[y1:y2,x-2:x+3] = pdict[df_US.loc[i]['part']]
+                #cv2.line(cs2,(x1,y1),(x1,y2),pdict[df_US.loc[i]['part']],5)
+            else:
+                print(x1,x2,y1,y2,pdict[df_US.loc[i]['part']])
+                y = int((y1+y2)/2)
+                cs2[y-2:y+3,x1:x2] = pdict[df_US.loc[i]['part']]
+                #cv2.line(cs2,(x1,y1),(x2,y1),pdict[df_US.loc[i]['part']],5)
+    
+    imgplot(cs2)
+    return cs2
+
 
 #複数のエコー画像から結節のクラスター作成を行う
 
