@@ -18,27 +18,11 @@ def calc_inter(intersection):
     #print(v_list)
 
     for i, (h_x1, h_x2, h_y1, h_y2) in enumerate(h_list):
-        h_xran = list(range(h_x1, h_x2+1))
-        h_yran = list(range(h_y1, h_y2+1))
-    
-        for j, (v_x1, v_x2, v_y1, v_y2) in enumerate(v_list):
-            v_xran = list(range(v_x1, v_x2+1))
-            v_yran = list(range(v_y1, v_y2+1))
-
-            target_xran = set(h_xran) & set(v_xran)
-            target_yran = set(h_yran) & set(v_yran)
-
-            #print(i,j)
-            #print(target_xran)
-            #print(target_yran)            
-            if len(target_xran) > 0 and len(target_yran) > 0:
-                #print('True')
-                tar_x1 = min(target_xran)
-                tar_x2 = max(target_xran)
-                tar_y1 = min(target_yran)
-                tar_y2 = max(target_yran)
-            
-                inter_list.append((int((tar_x1 + tar_x2)/2), int((tar_y1 + tar_y2)/2)))
+        for j, (v_x1, v_x2, v_y1, v_y2) in enumerate(v_list):  
+            if h_x1<v_x1 and h_x2>v_x2 and h_y1>v_y1 and h_y2<v_y2:
+                inter_list.append((int((v_x1 + v_x2)/2), int((h_y1 + h_y2)/2)))
+                
+    return inter_list
     
     return list(set(inter_list))
 
