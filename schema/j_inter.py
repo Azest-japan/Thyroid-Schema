@@ -21,8 +21,6 @@ def calc_inter(intersection):
         for j, (v_x1, v_x2, v_y1, v_y2) in enumerate(v_list):  
             if h_x1<v_x1 and h_x2>v_x2 and h_y1>v_y1 and h_y2<v_y2:
                 inter_list.append((int((v_x1 + v_x2)/2), int((h_y1 + h_y2)/2)))
-                
-    return inter_list
     
     return list(set(inter_list))
 
