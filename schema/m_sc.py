@@ -19,8 +19,6 @@ import pprint
 
 from dataprep import cut
 
-
-
 #画像の表示
 
 def imgshow(img):
@@ -134,8 +132,11 @@ def thyroid_trim(img,dst,ct,pl=True):
 
     #print('t:',t,',b:',b,',l:',l,',r',r)
     print('[{}:{},{}:{}]'.format(ct[0]-t,ct[0]+b,ct[1]-l,ct[1]+r))
-    sc = img[ct[0]-t:ct[0]+b,ct[1]-l:ct[1]+r].copy()
+    if t==b or l == r:
+        return -1,-1
     
+    sc = img[ct[0]-t:ct[0]+b,ct[1]-l:ct[1]+r].copy()
+
     if pl==True:
         print('sc:')
         imgplot(sc)
@@ -534,11 +535,17 @@ def process(img):
 
     dst,ct = thyroid_detect(img,pl=False)
     sc,_ = thyroid_trim(img,dst,ct,pl=False)
+    if type(sc)==int:
+        return -1,-1,-1,-1,-1,-1
+    
     sh,direction = probe_detect(sc,pl=False)
 
     cmax,cd = thyroid_measure(sc,sh,direction,pl=False)
     sc1 = grayscale(sc)
     sc1[sh>0] = 0
+    if np.max(sh)<=0:
+        return -1,-1,-1,-1,-1,-1
+    
     contours, _ = cv2.findContours(sh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     contours.sort(key=cv2.contourArea, reverse=True)
     xp,yp,wp,hp = cv2.boundingRect(contours[0])
@@ -681,7 +688,7 @@ def detect_color(img,bgrLower,bgrUpper):
 
 
 def detect_all(img,pt,cdict):
-    df = pd.DataFrame(columns = ['image_name','part','part_number','area','col','sc_points'])
+    df = pd.DataFrame(columns = ['image_name','part','part_number','area','max_dist','max_dist_center','col','sc_points'])
     h,w  = img.shape[:2]
     for part in ['T','B','M']:
         img2 = img
@@ -694,7 +701,7 @@ def detect_all(img,pt,cdict):
         img0[img0>60] = 200
         img0[img0<=60] = 0
 
-        imgplot(img0)
+        #imgplot(img0)
         
         #edged = cv2.Canny(img, 30, 200)    # find edges of nodule
         contours, hierarchy = cv2.findContours(img0.copy(),cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
@@ -707,7 +714,7 @@ def detect_all(img,pt,cdict):
                 area = cv2.contourArea(cnt)
             else:
                 area = img0[img0!=0].shape[0]
-            if area > 30:
+            if (area > 60 and part!='T') or (area>120 and part=='T'):
                 n += 1
                 print(area)
                 part_temp = np.zeros((img.shape[0],img.shape[1]))
@@ -722,11 +729,10 @@ def detect_all(img,pt,cdict):
                 min_col = min(x_list)
                 max_col = max(x_list)
 
-                df_temp = pd.Series([pt[0]+'_'+pt[1],part,i+1,area, (min_col, max_col),None],index = df.columns)
+                df_temp = pd.Series([pt[0]+'_'+pt[1],part,i,None,None,None, (min_col, max_col),None],index = df.columns)
                 df = df.append(df_temp, ignore_index = True)
             
     return df
-
 
 
 #アノテーション画像から甲状腺の中心、端を特定してプローブの位置を補正する
@@ -734,6 +740,7 @@ def detect_all(img,pt,cdict):
 
 def calc_width(img,factor=0.27):
     img = grayscale(img)
+    
     img[img<60] = 0
     img[img!=0] = 240
     _,w = img.shape
@@ -752,10 +759,12 @@ def calc_width(img,factor=0.27):
             index += 1
     
     slist = np.array(slist)
-    n = int(slist.shape[0]*factor + 0.25)
+    n = np.unique(np.sort(slist[:,3]))
+    m = np.unique(np.sort(slist[:,2]))
     
-    t_dist = slist[np.argsort(slist[:,2])[n],2]
-    t_width = slist[np.argsort(slist[:,3])[n],3]
+    
+    t_dist = m[int(m.shape[0]*0.27+0.5)]
+    t_width = n[int(n.shape[0]*0.27+0.5)]
     
     scol = np.intersect1d(slist[np.where(slist[:,3]<t_width)[0],1],slist[np.where(slist[:,2]<t_dist)[0],1])
 
@@ -767,7 +776,7 @@ def calc_width(img,factor=0.27):
         scol2.append([np.where(slist[:,1]==i)[0][0],i])
     
     scol = np.array(scol2)
-    imgplot(img)
+    #imgplot(img)
     
     return scol,slist,t_width,t_dist
 
@@ -779,6 +788,8 @@ def detect_center(img,scol,slist):
     
     smin = 0
     min_col = -1
+    cwidth = -1
+    index = -1
     for i in scol:
         w = slist[i[0],3]
         d = slist[i[0],2]
@@ -788,21 +799,37 @@ def detect_center(img,scol,slist):
         #print(np.min(slist[np.where(slist[:,2]<=d)[0],3]))
         
         if i[0]>=10 and ((w < np.sort(slist[:i[0],3])[int(i[0]*0.2)] and w < np.sort(slist[i[0]:,3])[int((slist.shape[0]-i[0])*0.2)]) or (w < np.min(slist[np.where(slist[:,2]<=d)[0],3]) and (w < np.sort(slist[:i[0],3])[int(i[0]*0.3)] and w < np.sort(slist[i[0]:,3])[int((slist.shape[0]-i[0])*0.3)]))):
-            print(i,w,d,smin,2*w+d)
+            #print(i,w,d,smin,2*w+d)
             if smin ==0:
                 smin = 2*w+d
                 min_col = i[1]
+                cwidth = w
+                index = i[0]
             elif smin>2*w + d:
                 smin = 2*w+d
                 min_col = i[1]
+                cwidth = w
+                index = i[0]
                 #print(i,w,d)
     
     img = grayscale(img)
     img[:,min_col-1:min_col+1] = 255
-    imgplot(img)
+    #imgplot(img)
     
-    return min_col
+    return min_col,cwidth,index
 
+
+def calc_inter(intersection):
+    inter_list=[]
+    h_list = [k[1] for k in intersection if k[0] == 'h']
+    v_list = [k[1] for k in intersection if k[0] == 'v']
+
+    for i, (h_x1, h_x2, h_y1, h_y2) in enumerate(h_list):
+        for j, (v_x1, v_x2, v_y1, v_y2) in enumerate(v_list):  
+            if h_x1<v_x1 and h_x2>v_x2 and h_y1>v_y1 and h_y2<v_y2:
+                inter_list.append((int((v_x1 + v_x2)/2), int((h_y1 + h_y2)/2)))
+                
+    return inter_list
 
 def detect_edge(img, slist, I1, edge_range=20): 
     
@@ -1139,11 +1166,13 @@ def dist_thy_nod(I1,df_US):
             if I1['direction'] == 'vertical':
                 
                 yn1,yn2 = int(yp1 + minc/I1['shape'][1]*(yp2-yp1) + 0.5), int(yp1 + maxc/I1['shape'][1]*(yp2-yp1) + 0.5)
+                yn2 = max(yn2,yn1+2)
                 xn1,xn2 = int(xp1 + (xp2-xp1)/4 + 0.5), int(xp1 + 3*(xp2-xp1)/4+0.5)
                 print(yn1-y1,yn2-y1,xn1-x1,xn2-x1)
             else:
                 
                 xn1,xn2 = int(xp1 + minc/I1['shape'][1]*(xp2-xp1) + 0.5), int(xp1 + maxc/I1['shape'][1]*(xp2-xp1) + 0.5)
+                xn2 = max(xn2,xn1+2)
                 yn1,yn2 = int(yp1 + (yp2-yp1)/4 + 0.5), int(yp1 + 3*(yp2-yp1)/4+0.5)
 
             df_US.at[i,'sc_points'] = (xn1-x1,xn2-x1,yn1-y1,yn2-y1)

@@ -5,8 +5,6 @@ import sys
 import matplotlib.pyplot as plt
 import gc
 import os
-from tqdm.notebook import tqdm
-from pathlib import Path
 from dataprep import cut
 if '/test/Ito/Code/' not in sys.path:
     sys.path.append('/test/Ito/Code/schema')
@@ -17,8 +15,8 @@ cs = grayscale(cv2.imread('/test/Ito/schema2.jpg'))  # schema2 (96, 100, 684, 63
 xs,ys,ws,hs = (96, 100, 684, 636)
 
 #Thyroid 
-cdict['TL'] = np.array([50, 150, 0])# 抽出する色の下限(BGR)
-cdict['TU'] = np.array([140, 240, 70])# 抽出する色の上限(BGR)
+cdict['TL'] = np.array([40, 150, 0])# 抽出する色の下限(BGR)
+cdict['TU'] = np.array([120, 240, 70])# 抽出する色の上限(BGR)
 
 #Nodule
 cdict['BL'] = np.array([0, 20, 100])
@@ -39,13 +37,15 @@ cs2[:,:,:] = cs[ys:ys+hs,xs:xs+ws].reshape((hs,ws,1))
 cs2[cs2<120] = 0
 cs2[cs2>120] = 255
 intersection = []
-for ino in ['02','05','07',10,11,12,13,14,15,17,19]:
+for ino in ['02','06','08','11','13',16]:
 
-    pt = ['206',str(ino)]
+    pt = ['205',str(ino)]
 
     img = cv2.imread('/test/Ito/Ischema/'+pt[0]+'_Image0'+pt[1]+'.jpg')
     t,b,l,r = cut(img)
     img2 = cv2.imread('/test/Ito/test2/a_'+pt[0]+'_Image0'+pt[1]+'.jpg')
+    if type(img2) == type(None):
+        
     img2 = img2[t:b,l:r]
 
     df_I = pd.DataFrame(columns = ['image_name','dimensions','shape','direction','side','df_US','sc2_dim','sh_dim','t_center','t_edge','s_edge'])
@@ -57,7 +57,7 @@ for ino in ['02','05','07',10,11,12,13,14,15,17,19]:
 
     scol,slist,t_width,t_dist = calc_width(img2)
     if I1['direction'] == 'horizontal':
-        I1['t_center'] = detect_center(img2,scol,slist)
+        I1['t_center'],_,_ = detect_center(img2,scol,slist)
 
     I1['t_edge'] = detect_edge(img2, slist, I1, edge_range=20)
     I1['s_edge'] = calc_schema_edge(sc2,I1)
@@ -65,12 +65,19 @@ for ino in ['02','05','07',10,11,12,13,14,15,17,19]:
     #I1, sh = shift_probe(I1,sh,(slist[0,1],slist[-1,1]))
 
     df_US = dist_thy_nod(I1,df_US)
+    print(df_US)
     df_US,intersection = transfer_schema(I1,df_US,intersection)
     fig = plt.figure()
     print('haha')
     cs2 = plot_schema(cs2,df_US,pdict,I1)
+    
+pts = calc_inter(intersection)
+for p in pts:
+    for i in range(p[1]-4,p[1]+4):
+        for j in range(p[0]-4,p[0]+4):
+            cs2[i,j] = np.uint8((np.exp(-((p[0]-j)**2+(p[1]-i)**2)/(2*1**2)) * 255+2)*np.array([0.1,0.9,1]))
 
-cv2.imwrite('/test/Ito/sc206-.jpg',cs2)
+#cv2.imwrite('/test/Ito/sc206-.jpg',cs2)
 
 
 '''
